@@ -1,5 +1,8 @@
+const authRoutes = require("./src/auth/auth.routes");
 const express = require("express");
 const cors = require("cors");
+const cookieParser = require("cookie-parser");
+
 require("dotenv").config();
 
 const { prisma } = require("./src/db");
@@ -8,6 +11,9 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static("public"));
+app.use(cookieParser());
+app.use("/auth", authRoutes);
 
 app.get("/health", (req, res) => {
   res.json({ ok: true });
