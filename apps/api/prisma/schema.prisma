@@ -1,0 +1,79 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  calendarsOwned Calendar[]        @relation("CalendarOwner")
+  memberships    CalendarMember[]
+  eventsCreated  Event[]           @relation("EventCreator")
+
+  @@map("users")
+}
+
+model Calendar {
+  id        String   @id @default(uuid()) @db.Uuid
+  type      String   // personal | team (앱 레벨에서 검증, DB CHECK는 다음 단계에 SQL로 가능)
+  name      String
+  ownerId   String   @db.Uuid @map("owner_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  owner   User             @relation("CalendarOwner", fields: [ownerId], references: [id])
+  members CalendarMember[]
+  events  Event[]
+
+  @@index([ownerId])
+  @@index([type])
+  @@map("calendars")
+}
+
+model CalendarMember {
+  calendarId String   @db.Uuid @map("calendar_id")
+  userId     String   @db.Uuid @map("user_id")
+  role       String   // owner | member
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  calendar Calendar @relation(fields: [calendarId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@id([calendarId, userId])
+  @@index([userId])
+  @@map("calendar_members")
+}
+
+model Event {
+  id         String   @id @default(uuid()) @db.Uuid
+  calendarId String   @db.Uuid @map("calendar_id")
+  title      String
+  startAt    DateTime @map("start_at")
+  endAt      DateTime @map("end_at")
+  memo       String?
+  createdBy  String   @db.Uuid @map("created_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  calendar Calendar @relation(fields: [calendarId], references: [id])
+  creator  User     @relation("EventCreator", fields: [createdBy], references: [id])
+
+  @@index([calendarId, startAt])
+  @@index([createdBy])
+  @@map("events")
+}
