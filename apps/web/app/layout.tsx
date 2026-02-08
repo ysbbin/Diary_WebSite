@@ -32,3 +32,10 @@ export default function RootLayout({
     </html>
   );
 }
+
+<link
+  rel="stylesheet"
+  as="style"
+  crossOrigin=""
+  href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@latest/dist/web/static/pretendard.css"
+/>
