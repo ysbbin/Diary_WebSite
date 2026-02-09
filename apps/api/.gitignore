@@ -3,3 +3,6 @@ node_modules
 .env
 
 /generated/prisma
+
+# dev test pages
+apps/api/public/*.html

@@ -49,17 +49,29 @@ async function signup(req, res) {
 
     // 4) 유저 생성
     const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-        name: name || null,
-      },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        createdAt: true,
-      },
+        data: {
+            email,
+            passwordHash,
+            name: name || null,
+
+            // ✅ 회원가입 시 개인 캘린더 자동 생성
+            calendarsOwned: {
+            create: {
+                type: "personal",
+                name: "My Calendar",
+                members: {
+                create: {
+                    role: "owner",
+                    user: {
+                    // 방금 생성되는 유저를 연결
+                    connect: { email },
+                    },
+                },
+                },
+            },
+            },
+        },
+        select: { id: true, email: true, name: true, createdAt: true },
     });
 
     return res.status(201).json({
