@@ -174,5 +174,24 @@ async function me(req, res) {
   }
 }
 
-module.exports = { signup, login, me };
 
+/**
+ * 로그아웃
+ * POST /auth/logout
+ * - access_token 쿠키 삭제
+ */
+async function logout(req, res) {
+  try {
+    res.clearCookie("access_token", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: false, // 로컬 개발
+    });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, message: err.message });
+  }
+}
+
+module.exports = { signup, login, me, logout };
