@@ -49,17 +49,29 @@ async function signup(req, res) {
 
     // 4) 유저 생성
     const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-        name: name || null,
-      },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        createdAt: true,
-      },
+        data: {
+            email,
+            passwordHash,
+            name: name || null,
+
+            // ✅ 회원가입 시 개인 캘린더 자동 생성
+            calendarsOwned: {
+            create: {
+                type: "personal",
+                name: "My Calendar",
+                members: {
+                create: {
+                    role: "owner",
+                    user: {
+                    // 방금 생성되는 유저를 연결
+                    connect: { email },
+                    },
+                },
+                },
+            },
+            },
+        },
+        select: { id: true, email: true, name: true, createdAt: true },
     });
 
     return res.status(201).json({
@@ -162,5 +174,24 @@ async function me(req, res) {
   }
 }
 
-module.exports = { signup, login, me };
 
+/**
+ * 로그아웃
+ * POST /auth/logout
+ * - access_token 쿠키 삭제
+ */
+async function logout(req, res) {
+  try {
+    res.clearCookie("access_token", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: false, // 로컬 개발
+    });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, message: err.message });
+  }
+}
+
+module.exports = { signup, login, me, logout };

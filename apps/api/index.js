@@ -1,3 +1,4 @@
+const eventsRoutes = require("./src/events/events.routes");
 const authRoutes = require("./src/auth/auth.routes");
 const express = require("express");
 const cors = require("cors");
@@ -14,6 +15,8 @@ app.use(express.json());
 app.use(express.static("public"));
 app.use(cookieParser());
 app.use("/auth", authRoutes);
+app.use("/events", eventsRoutes);
+
 
 app.get("/health", (req, res) => {
   res.json({ ok: true });

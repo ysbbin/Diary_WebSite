@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>Update Event Test</title>
+  </head>
+  <body>
+    <h2>Update Event Test</h2>
+
+    <label>Event ID: <input id="eventId" style="width: 420px" /></label><br />
+
+    <label>New Title: <input id="title" value="Updated title" /></label><br />
+    <label>New Memo: <input id="memo" value="updated memo" /></label><br />
+
+    <button id="btn">Update</button>
+
+    <pre id="out"></pre>
+
+    <script>
+      const out = document.getElementById("out");
+
+      document.getElementById("btn").addEventListener("click", async () => {
+        out.textContent = "loading...";
+
+        const eventId = document.getElementById("eventId").value.trim();
+        const payload = {
+          title: document.getElementById("title").value,
+          memo: document.getElementById("memo").value,
+        };
+
+        const res = await fetch(`/events/${eventId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        out.textContent = JSON.stringify(data, null, 2);
+      });
+    </script>
+  </body>
+</html>
