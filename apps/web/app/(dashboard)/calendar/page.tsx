@@ -1,16 +1,13 @@
-// apps/web/app/(dashboard)/calendar/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import MonthGrid, { type CalendarEvent } from "@/components/calendar/MonthGrid";
 import TagSidebar, { type Tag } from "@/components/calendar/TagSidebar";
 import MiniMonthCalendar from "@/components/calendar/MiniMonthCalendar";
-
-// ✅ 너가 이미 만들어둔 "연도 -> CalendarEvent[] 공휴일" 변환 함수
+import UserMenu from "@/components/auth/UserMenu";
 import { getHolidayEvents } from "@/lib/holidayEvents";
 
 const LS_TAGS = "diary.tags.v1";
-const LS_EVENTS = "diary.events.v1";
 
 const HOLIDAY_TAG: Tag = { id: "holiday", name: "Holiday", color: "#e53935" };
 
@@ -18,21 +15,44 @@ const DEFAULT_TAGS: Tag[] = [
   { id: "t1", name: "Work", color: "#3b82f6" },
   { id: "t2", name: "Personal", color: "#22c55e" },
   { id: "t3", name: "Urgent", color: "#ef4444" },
-  // ✅ 공휴일 태그(고정)
   HOLIDAY_TAG,
 ];
-
-function reviveEvents(raw: any[]): CalendarEvent[] {
-  return (raw ?? []).map((e) => ({
-    ...e,
-    start: new Date(e.start),
-    end: new Date(e.end),
-  }));
-}
 
 function ensureHolidayTag(inputTags: Tag[]): Tag[] {
   const has = inputTags.some((t) => t.id === HOLIDAY_TAG.id);
   return has ? inputTags : [...inputTags, HOLIDAY_TAG];
+}
+
+type ApiEvent = {
+  id: string;
+  title: string;
+  startAt: string;
+  endAt: string;
+  memo?: string | null;
+  tagId?: string | null;
+};
+
+function monthRange(y: number, m: number) {
+  const from = new Date(y, m, 1, 0, 0, 0, 0);
+  const to = new Date(y, m + 1, 0, 23, 59, 59, 999);
+  return { from, to };
+}
+
+function apiToUiEvent(e: ApiEvent): CalendarEvent {
+  return {
+    id: e.id,
+    title: e.title,
+    start: new Date(e.startAt),
+    end: new Date(e.endAt),
+    tagId: (e.tagId ?? "t1") as any,
+  };
+}
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "";
+function apiUrl(path: string) {
+  if (API_BASE) return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+  if (path.startsWith("/events")) return `/api${path}`;
+  return path;
 }
 
 export default function CalendarPage() {
@@ -43,16 +63,14 @@ export default function CalendarPage() {
   const [month, setMonth] = useState(now.getMonth());
 
   const [tags, setTags] = useState<Tag[]>(DEFAULT_TAGS);
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-
-  // ✅ 공휴일은 별도 state (localStorage 저장 X)
-  const [holidayEvents, setHolidayEvents] = useState<CalendarEvent[]>([]);
-
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>(
     DEFAULT_TAGS.map((t) => t.id)
-  ); // ✅ 처음부터 전부 체크
+  );
 
-  // ✅ 마운트 후 localStorage 로딩
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [holidayEvents, setHolidayEvents] = useState<CalendarEvent[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+
   useEffect(() => {
     setMounted(true);
 
@@ -64,10 +82,12 @@ export default function CalendarPage() {
         if (Array.isArray(parsed) && parsed.length > 0) {
           const nextTags = ensureHolidayTag(parsed);
           setTags(nextTags);
-          setSelectedTagIds(nextTags.map((t: Tag) => t.id)); // ✅ 로딩된 태그도 전부 체크
+          setSelectedTagIds(nextTags.map((t: Tag) => t.id));
+        } else {
+          setTags(DEFAULT_TAGS);
+          setSelectedTagIds(DEFAULT_TAGS.map((t) => t.id));
         }
       } else {
-        // localStorage에 없으면 DEFAULT_TAGS 그대로(이미 holiday 포함)
         setTags(DEFAULT_TAGS);
         setSelectedTagIds(DEFAULT_TAGS.map((t) => t.id));
       }
@@ -75,24 +95,23 @@ export default function CalendarPage() {
       setTags(DEFAULT_TAGS);
       setSelectedTagIds(DEFAULT_TAGS.map((t) => t.id));
     }
-
-    // events load (유저 일정만)
-    try {
-      const storedEvents = localStorage.getItem(LS_EVENTS);
-      if (storedEvents) {
-        const parsed = JSON.parse(storedEvents);
-        if (Array.isArray(parsed)) setEvents(reviveEvents(parsed));
-      }
-    } catch {}
   }, []);
 
-  // ✅ 공휴일 로딩: mounted 이후 + year 변경 시
+  // tags save
   useEffect(() => {
     if (!mounted) return;
+    try {
+      const nextTags = ensureHolidayTag(tags);
+      localStorage.setItem(LS_TAGS, JSON.stringify(nextTags));
+    } catch {}
+  }, [mounted, tags]);
 
+  // holidays
+  useEffect(() => {
+    if (!mounted) return;
     (async () => {
       try {
-        const hol = await getHolidayEvents(year); // CalendarEvent[]
+        const hol = await getHolidayEvents(year);
         setHolidayEvents(hol);
       } catch {
         setHolidayEvents([]);
@@ -100,30 +119,47 @@ export default function CalendarPage() {
     })();
   }, [mounted, year]);
 
-  // ✅ localStorage 저장 (tags)
+  async function reloadEvents(targetYear = year, targetMonth = month) {
+    setLoadingEvents(true);
+    try {
+      const { from, to } = monthRange(targetYear, targetMonth);
+      const qs = new URLSearchParams({
+        from: from.toISOString(),
+        to: to.toISOString(),
+      });
+
+      const url = apiUrl(`/events?${qs.toString()}`);
+      console.log("[events] GET", url);
+
+      const res = await fetch(url, {
+        cache: "no-store",
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`GET 실패 (${res.status})\n${txt}`);
+      }
+
+      const data = await res.json().catch(() => ({}));
+      const list: ApiEvent[] = Array.isArray(data?.events) ? data.events : [];
+      setEvents(list.map(apiToUiEvent));
+    } finally {
+      setLoadingEvents(false);
+    }
+  }
+
   useEffect(() => {
     if (!mounted) return;
-    try {
-      // holiday 태그가 빠지지 않도록 보정해서 저장
-      const nextTags = ensureHolidayTag(tags);
-      localStorage.setItem(LS_TAGS, JSON.stringify(nextTags));
-    } catch {}
-  }, [mounted, tags]);
+    reloadEvents(year, month).catch((e) => {
+      console.error(e);
+      setEvents([]);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, year, month]);
 
-  // ✅ localStorage 저장 (유저 일정 events만)
-  useEffect(() => {
-    if (!mounted) return;
-    try {
-      localStorage.setItem(LS_EVENTS, JSON.stringify(events));
-    } catch {}
-  }, [mounted, events]);
+  const allEvents = useMemo(() => [...events, ...holidayEvents], [events, holidayEvents]);
 
-  // ✅ MonthGrid로 내려갈 전체 이벤트 = 유저 + 공휴일
-  const allEvents = useMemo(() => {
-    return [...events, ...holidayEvents];
-  }, [events, holidayEvents]);
-
-  // ✅ “체크된 태그만” 일정 표시 (아무것도 체크 안 하면 아무것도 안 보이게)
   const filteredEvents = useMemo(() => {
     if (selectedTagIds.length === 0) return [];
     return allEvents.filter((e) => selectedTagIds.includes(e.tagId));
@@ -134,43 +170,59 @@ export default function CalendarPage() {
     setYear(d.getFullYear());
     setMonth(d.getMonth());
   }
+
   function nextMonth() {
     const d = new Date(year, month + 1, 1);
     setYear(d.getFullYear());
     setMonth(d.getMonth());
   }
 
-  if (!mounted) {
-    return <div style={{ padding: 24 }} />;
-  }
+  if (!mounted) return <div style={{ padding: 24 }} />;
 
   return (
     <div style={{ padding: 24 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-        }}
-      >
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 900 }}>Calendar</h1>
-          <div style={{ marginTop: 4, opacity: 0.7 }}>
-            월간 뷰 · 드래그로 기간 선택(하이라이트)
+      <div style={{ display: "grid", gap: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>Calendar</h1>
+            <div style={{ marginTop: 6, opacity: 0.7 }}>
+              월간 뷰 · 드래그로 기간 선택
+              {loadingEvents ? (
+                <span style={{ marginLeft: 10, fontWeight: 800 }}>· 불러오는 중...</span>
+              ) : null}
+            </div>
           </div>
+
+          <UserMenu />
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            marginTop: 4,
+          }}
+        >
           <button onClick={prevMonth} style={btnStyle}>
             ←
           </button>
+
           <div style={{ fontWeight: 900, minWidth: 140, textAlign: "center" }}>
-            {new Date(year, month, 1).toLocaleString(undefined, {
+            {new Date(year, month, 1).toLocaleString("ko-KR", {
               year: "numeric",
               month: "long",
             })}
           </div>
+
           <button onClick={nextMonth} style={btnStyle}>
             →
           </button>
@@ -205,37 +257,16 @@ export default function CalendarPage() {
               onChangeSelectedTagIds={setSelectedTagIds}
               onAddTag={(tag) => {
                 setTags((prev) => ensureHolidayTag([...prev, tag]));
-                setSelectedTagIds((prev) =>
-                  Array.from(new Set([...prev, tag.id]))
-                ); // ✅ 새 태그도 자동 체크
+                setSelectedTagIds((prev) => Array.from(new Set([...prev, tag.id])));
               }}
               onUpdateTag={(next) => {
                 setTags((prev) =>
-                    ensureHolidayTag(prev.map((t) => (t.id === next.id ? next : t)))
+                  ensureHolidayTag(prev.map((t) => (t.id === next.id ? next : t)))
                 );
-                }}
+              }}
               onDeleteTag={(id) => {
-                // ✅ holiday 태그는 삭제 금지
-                if (id === HOLIDAY_TAG.id) return;
-
-                // ✅ 태그 삭제 시: 선택에서도 제거
                 setSelectedTagIds((prev) => prev.filter((x) => x !== id));
-
-                // ✅ 일정의 tagId 처리: 남은 태그가 있으면 첫 태그로 이동, 없으면 삭제
-                setTags((prevTags) => {
-                  const nextTagsRaw = prevTags.filter((t) => t.id !== id);
-                  const nextTags = ensureHolidayTag(nextTagsRaw);
-
-                  setEvents((prevEvents) => {
-                    if (nextTags.length === 0) return prevEvents.filter((e) => e.tagId !== id);
-                    const fallbackId = nextTags[0].id;
-                    return prevEvents.map((e) =>
-                      e.tagId === id ? { ...e, tagId: fallbackId } : e
-                    );
-                  });
-
-                  return nextTags;
-                });
+                setTags((prevTags) => ensureHolidayTag(prevTags.filter((t) => t.id !== id)));
               }}
             />
           </div>
@@ -247,11 +278,77 @@ export default function CalendarPage() {
             month={month}
             tags={tags}
             events={filteredEvents}
-            onCreateEvent={(ev) => setEvents((prev) => [...prev, ev])}
-            onUpdateEvent={(ev) =>
-              setEvents((prev) => prev.map((x) => (x.id === ev.id ? ev : x)))
-            }
-            onDeleteEvent={(id) => setEvents((prev) => prev.filter((x) => x.id !== id))}
+            onCreateEvent={async (ev) => {
+              const payload = {
+                title: ev.title,
+                startAt: ev.start.toISOString(),
+                endAt: ev.end.toISOString(),
+                memo: "",
+                tagId: ev.tagId ?? "t1",
+              };
+
+              const url = apiUrl("/events");
+              console.log("[events] POST", url, payload);
+
+              const res = await fetch(url, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(payload),
+                credentials: "include",
+              });
+
+              if (!res.ok) {
+                const txt = await res.text().catch(() => "");
+                alert(`일정 저장 실패 (${res.status})\n${txt}`);
+                return;
+              }
+
+              await reloadEvents();
+            }}
+            onUpdateEvent={async (ev) => {
+              const payload = {
+                title: ev.title,
+                startAt: ev.start.toISOString(),
+                endAt: ev.end.toISOString(),
+                memo: "",
+                tagId: ev.tagId ?? "t1",
+              };
+
+              const url = apiUrl(`/events/${ev.id}`);
+              console.log("[events] PATCH", url, payload);
+
+              const res = await fetch(url, {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(payload),
+                credentials: "include",
+              });
+
+              if (!res.ok) {
+                const txt = await res.text().catch(() => "");
+                alert(`일정 수정 실패 (${res.status})\n${txt}`);
+                return;
+              }
+
+              await reloadEvents();
+            }}
+            onDeleteEvent={async (id) => {
+              const url = apiUrl(`/events/${id}`);
+              console.log("[events] DELETE", url);
+
+              const res = await fetch(url, {
+                method: "DELETE",
+                credentials: "include",
+              });
+
+              if (!res.ok) {
+                const txt = await res.text().catch(() => "");
+                alert(`일정 삭제 실패 (${res.status})\n${txt}`);
+                return;
+              }
+
+              await reloadEvents();
+            }}
           />
         </div>
       </div>
